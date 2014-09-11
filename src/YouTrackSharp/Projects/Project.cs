@@ -40,6 +40,7 @@ namespace YouTrackSharp.Projects
         public string Name { get; set; }
         public string ShortName { get; set; }
         public bool IsImporting { get; set; }
+        public string Description { get; set; }
         public SubValuesArray AssigneesFullname { get; set; }
 
         protected bool Equals(Project other)
