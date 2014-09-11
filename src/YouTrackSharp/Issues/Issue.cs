@@ -1,4 +1,4 @@
-﻿#region License
+#region License
 
 // Distributed under the BSD License
 //   
@@ -34,17 +34,28 @@
 using System;
 using System.Collections.Generic;
 using System.Dynamic;
+using System.Linq;
 
 namespace YouTrackSharp.Issues
 {
     public class Issue : DynamicObject
     {
         readonly IDictionary<string, object> _allFields = new Dictionary<string, object>(StringComparer.InvariantCultureIgnoreCase);
+
         string _id;
 
         public string Id
         {
             get { return _id ?? (_id = (string) _allFields["id"]); }
+        }
+
+        public override IEnumerable<string> GetDynamicMemberNames()
+        {
+            var keys = _allFields.Keys.OrderBy(o => o).ToList();
+            int tmpCT = keys.Count;
+            for (int ct = 0; ct < tmpCT; ct++)
+                keys.Add("PropertyByIndex_"+ct.ToString());
+            return keys;
         }
 
         public ExpandoObject ToExpandoObject()
@@ -72,25 +83,125 @@ namespace YouTrackSharp.Issues
 
         public override bool TryGetMember(GetMemberBinder binder, out object result)
         {
-            if (_allFields.ContainsKey(binder.Name))
+            if (!binder.Name.ToLower().StartsWith("propertybyindex_"))
             {
-                result = _allFields[binder.Name];
-                return true;
+
+                if (_allFields.Any(a => a.Key.ToLower().Replace(" ", "_") == binder.Name.ToLower()))
+                {
+                    //result = _allFields[binder.Name];
+                    if (_allFields.Count(c => c.Key.ToLower().Replace(" ", "_") == binder.Name.ToLower()) == 1)
+                        result = _allFields.First(w => w.Key.ToLower().Replace(" ", "_") == binder.Name.ToLower()).Value;
+                    else
+                    {
+                        result =
+                            _allFields.Where(w => w.Key.ToLower().Replace(" ", "_") == binder.Name.ToLower())
+                                .ToDictionary(d => d.Key, d => d.Value);
+                    }
+                    return true;
+                }
             }
-            return base.TryGetMember(binder, out result);
+            else
+            {
+                int index;
+                if (!int.TryParse(binder.Name.Split('_')[1], out index))
+                    index = -1;
+                if (index > -1 && index < _allFields.Count)
+                {
+                    result = _allFields.ElementAt(index);
+                    return true;
+                }
+            }
+            if (base.TryGetMember(binder, out result))
+                return true;
+
+            
+            result = null;
+            return false;
         }
 
         public override bool TrySetMember(SetMemberBinder binder, object value)
         {
-            if (String.Compare(binder.Name, "field", StringComparison.OrdinalIgnoreCase) == 0)
+            if (!binder.Name.ToLower().StartsWith("propertybyindex_") && !binder.Name.ToLower().StartsWith("propertygenericset"))
             {
-                foreach (var val in (IEnumerable<dynamic>) value)
+                if (String.Compare(binder.Name, "field", StringComparison.OrdinalIgnoreCase) == 0)
                 {
-                    _allFields[val.name] = val.value;
+                    foreach (var val in (IEnumerable<dynamic>) value)
+                    {
+                        _allFields[val.name] = val.value;
+                    }
+                    return true;
                 }
-                return true;
+                _allFields[binder.Name] = value;
             }
-            _allFields[binder.Name] = value;
+            else if (binder.Name.ToLower().StartsWith("propertygenericset"))
+            {
+                string tmpKey = ((KeyValuePair<string, object>)value).Key.ToLower();
+                if (_allFields.Keys.Count(c => c.ToLower() == ((KeyValuePair<string, object>) value).Key.ToLower()) > 0)
+                {
+                    _allFields[
+                        _allFields.Keys.First(c => c.ToLower() == tmpKey)]
+                        =
+                        ((KeyValuePair<string, object>) value).Value;
+                }
+                else
+                {
+                    _allFields.Add(((KeyValuePair<string, object>)value).Key,
+                                ((KeyValuePair<string, object>)value).Value);
+                }
+            }
+            else
+            {
+                int index;
+                if (!int.TryParse(binder.Name.Split('_')[1], out index))
+                    index = -1;
+                if (index > -1 && index < _allFields.Count)
+                {
+                    try
+                    {
+                        if (_allFields.ElementAt(index).Key.ToLower() ==
+                            ((KeyValuePair<string, object>) value).Key.ToLower())
+                            _allFields[_allFields.ElementAt(index).Key] = ((KeyValuePair<string, object>) value).Value;
+                        else
+                            _allFields.Add(((KeyValuePair<string, object>) value).Key,
+                                ((KeyValuePair<string, object>) value).Value);
+                    }
+                    catch
+                    {
+                        _allFields.Add(((KeyValuePair<string, object>) value).Key,
+                            ((KeyValuePair<string, object>) value).Value);
+                    }
+                }
+                else
+                {
+                    _allFields.Add(((KeyValuePair<string, object>)value).Key,
+                            ((KeyValuePair<string, object>)value).Value);
+                }
+            }
+            return true;
+        }
+
+        public override bool TryGetIndex(GetIndexBinder binder, object[] indexes, out object result)
+        {
+            int index = (int)indexes[0];
+            return _allFields.TryGetValue("PropertyByIndex_" + index, out result);
+        }
+
+        public override bool TrySetIndex(
+        SetIndexBinder binder, object[] indexes, object value)
+        {
+            int index = (int)indexes[0];
+
+            if (index > -1)
+            {
+                if (index < _allFields.Count)
+                    _allFields[_allFields.ElementAt(index).Key] = value;
+            }
+            else
+            {
+                if (!_allFields.ContainsKey(((KeyValuePair<string, object>) value).Key))
+                    _allFields.Add(((KeyValuePair<string, object>) value).Key,
+                        ((KeyValuePair<string, object>) value).Value);
+            }
             return true;
         }
     }
